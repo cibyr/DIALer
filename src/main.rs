@@ -36,7 +36,7 @@ fn main() {
         let mut buf = [0, ..4096];
         match socket.recv_from(buf) {
             Ok((len, addr)) => {
-                println!("Received from {}:", addr);
+                println!("Received from {}:", addr.ip);
                 println!("{}", get_location(buf.slice(0, len)).expect("no location"));
             }
             _ => break
