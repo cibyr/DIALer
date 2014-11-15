@@ -2,6 +2,21 @@ use std::io::net::udp::UdpSocket;
 use std::io::net::ip::{Ipv4Addr, SocketAddr};
 use std::str::from_utf8;
 
+fn get_location(response: &[u8]) -> Option<&str> {
+    let location_header = "LOCATION: ";
+    match from_utf8(response) {
+        Some(response) => {
+            for line in response.lines_any() {
+                if line.starts_with(location_header) {
+                    return Some(line.slice_from(location_header.len()));
+                }
+            }
+            None
+        }
+        None => None
+    }
+}
+
 fn main() {
     let any_addr = SocketAddr { ip: Ipv4Addr(0, 0, 0, 0), port: 0 };
     let dst_addr = SocketAddr { ip: Ipv4Addr(239, 255, 255, 250), port: 1900 };
@@ -22,7 +37,7 @@ fn main() {
         match socket.recv_from(buf) {
             Ok((len, addr)) => {
                 println!("Received from {}:", addr);
-                println!("{}", from_utf8(buf.slice(0, len)).expect("utf8"));
+                println!("{}", get_location(buf.slice(0, len)).expect("no location"));
             }
             _ => break
         }
