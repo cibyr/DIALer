@@ -3,3 +3,6 @@
 name = "DIALer"
 version = "0.0.1"
 authors = ["cullinan"]
+
+[dependencies.hyper]
+git = "https://github.com/hyperium/hyper"

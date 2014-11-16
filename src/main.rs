@@ -1,3 +1,12 @@
+#![feature(phase)]
+
+extern crate hyper;
+#[phase(plugin)]
+extern crate regex_macros;
+extern crate regex;
+
+use hyper::Url;
+use hyper::client::Request;
 use std::io::net::udp::UdpSocket;
 use std::io::net::ip::{Ipv4Addr, SocketAddr};
 use std::str::from_utf8;
@@ -12,7 +21,7 @@ fn get_location(response: &[u8]) -> Option<&str> {
                 }
             }
             None
-        }
+        },
         None => None
     }
 }
@@ -37,7 +46,26 @@ fn main() {
         match socket.recv_from(buf) {
             Ok((len, addr)) => {
                 println!("Received from {}:", addr.ip);
-                println!("{}", get_location(buf.slice(0, len)).expect("no location"));
+                let location = get_location(buf.slice(0, len)).expect("no location");
+                println!("{}", location);
+                let url = match Url::parse(location) {
+                    Ok(url) => url,
+                    Err(e) => panic!("Invalid URL: {}", e)
+                };
+                let req = match Request::get(url) {
+                    Ok(req) => req,
+                    Err(err) => panic!("Failed to connect to {}: {}", location, err)
+                };
+                let mut res = req
+                    .start().unwrap() // failure: Error writing Headers
+                    .send().unwrap(); // failure: Error reading Response head.
+                let app_url = match res.headers.get_raw("Application-URL") {
+                    Some([ref app_url]) => app_url,
+                    _ => panic!("No app url from {}", location)
+                };
+                println!("App url: {}", from_utf8(app_url.as_slice()).unwrap());
+
+
             }
             _ => break
         }
