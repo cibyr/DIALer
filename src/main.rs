@@ -1,18 +1,23 @@
 #![feature(macro_rules)]
 #![feature(phase)]
 
+extern crate getopts;
 extern crate hyper;
 #[phase(plugin, link)] extern crate log;
 #[phase(plugin)] extern crate regex_macros;
 extern crate regex;
 extern crate url;
 
+use getopts::{optopt,optflag,getopts,OptGroup};
 use hyper::Url;
 use hyper::client::Request;
+use hyper::header::common::ContentLength;
+use hyper::header::common::ContentType;
 use std::error;
 use std::error::FromError;
 use std::io::net::udp::UdpSocket;
 use std::io::net::ip::{Ipv4Addr, SocketAddr};
+use std::os;
 use std::str::from_utf8;
 
 
@@ -81,6 +86,17 @@ macro_rules! try_log(
         Err(e) => {
             error!($($arg)*, e);
             return Err(::std::error::FromError::from_error(e));
+        },
+    })
+)
+
+
+macro_rules! try_log_return(
+    ($e:expr, $r:expr, $($arg:tt)*) => (match $e {
+        Ok(e) => e,
+        Err(e) => {
+            error!($($arg)*, e);
+            return $r;
         },
     })
 )
@@ -179,7 +195,10 @@ impl DialServer {
             },
         };
         let friendly_name = match body {
-            Some(body) => Some(get_friendly_name(body.as_slice()).to_string()),
+            Some(body) => match get_friendly_name(body.as_slice()) {
+                Some(name) => Some(name.to_string()),
+                None => None,
+            },
             None => None,
         };
         let name = match friendly_name {
@@ -194,22 +213,91 @@ impl DialServer {
         };
         Ok(DialServer { name: name, app_url: app_url.to_string() } )
     }
+
+    fn has_app(&self, app_name: &str) -> bool {
+        let url_string = if self.app_url.ends_with("/") {
+            self.app_url + app_name
+        } else {
+            self.app_url + "/" + app_name
+        };
+        let url = try_log_return!(Url::parse(url_string.as_slice()), false, "invalid url: {}");
+        let req = try_log_return!(Request::get(url), false, "Failed to connect to {}: {}", url_string);
+        let started = try_log_return!(req.start(), false, "Error writing headers: {}");
+        let res = try_log_return!(started.send(), false, "Error reading response headers: {}");
+        res.status == hyper::status::StatusCode::Ok
+    }
+
+    fn launch_app(&self, app_name: &str, payload: Option<&str>) -> DialResult<()> {
+        info!("Launching {} with payload {}", app_name, payload);
+        let url_string = if self.app_url.ends_with("/") {
+            self.app_url + app_name
+        } else {
+            self.app_url + "/" + app_name
+        };
+        let url = try_log!(Url::parse(url_string.as_slice()), "invalid url: {}");
+        let mut req = try_log!(Request::post(url), "Failed to connect to {}: {}", url_string);
+        match payload {
+            Some(payload) => req.headers_mut().set(ContentLength(payload.len())),
+            None => req.headers_mut().set(ContentLength(0))
+        };
+        req.headers_mut().set(ContentType(from_str("text/plain").unwrap()));
+        let mut started = try_log!(req.start(), "Error writing headers: {}");
+        match payload {
+            Some(payload) => try_log!(started.write(payload.as_bytes()), "Error writing body: {}"),
+            None => (),
+        };
+        let res = try_log!(started.send(), "Error reading response headers: {}");
+        match res.status.class() {
+            hyper::status::StatusClass::Success => Ok(()),
+            _ => Err(DialProtocolError),
+        }
+    }
 }
 
 
 fn main() {
+    let args = os::args();
+    let opts = [
+        optopt("a", "", "set application name", "NAME"),
+    ];
+    let matches = match getopts(args.tail(), opts) {
+        Ok(m) => { m }
+        Err(f) => { panic!(f.to_string()) }
+    };
+    let app = matches.opt_str("a");
+    let payload = if !matches.free.is_empty() {
+        Some(matches.free[0].as_slice())
+    } else {
+        None
+    };
+
     let locations = discover_dial_locations().ok().expect("discovery failed");
-    for location in locations.iter() {
-        match DialServer::new(location.as_slice()) {
-            Ok(DialServer { name, app_url } ) => {
-                println!("Name: {}", name);
-                println!("App url: {}", app_url);
+    let mut servers = locations.iter().filter_map(|loc| {
+        match DialServer::new(loc.as_slice()) {
+            Ok(server) => Some(server),
+            Err(e)     => {
+                error!("Couldn't understand DIAL server at location {}: {}", loc, e);
+                None
             },
-            Err(e) => {
-                error!("Couldn't understand DIAL server at location {}: {}", location, e);
+        }
+    });
+
+    match app {
+        Some(app) => {
+            let servers: Vec<DialServer> = servers.filter(|s| s.has_app(app.as_slice())).collect();
+            match servers.len() {
+                0 => panic!("No servers match"),
+                1 => servers[0].launch_app(app.as_slice(), payload).ok().expect("failure to launch"),
+                _ => unimplemented!(), // TODO: allow a choice betwwen multiple servers
+            }
+        },
+        None => {
+            println!("Discovered these DIAL servers:");
+            for server in servers {
+                let foo: String = server.name;
+                println!("Name: {}", foo);
+                println!("App url: {}", server.app_url);
             }
         }
     }
-
-    println!("YAY done!");
 }
