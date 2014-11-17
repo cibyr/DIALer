@@ -8,11 +8,10 @@ extern crate hyper;
 extern crate regex;
 extern crate url;
 
-use getopts::{optopt,optflag,getopts,OptGroup};
+use getopts::{optopt, getopts};
 use hyper::Url;
 use hyper::client::Request;
-use hyper::header::common::ContentLength;
-use hyper::header::common::ContentType;
+use hyper::header::common::{ContentLength, ContentType};
 use std::error;
 use std::error::FromError;
 use std::io::net::udp::UdpSocket;
