@@ -1,35 +1,42 @@
 #![feature(macro_rules)]
-#![feature(phase)]
+#![feature(plugin)]
 
 extern crate getopts;
 extern crate hyper;
-#[phase(plugin, link)] extern crate log;
-#[phase(plugin)] extern crate regex_macros;
+#[macro_use] extern crate log;
+#[plugin] #[no_link] extern crate regex_macros;
 extern crate regex;
 extern crate url;
 
 use getopts::{optopt, getopts};
-use hyper::Url;
 use hyper::client::Request;
-use hyper::header::common::{ContentLength, ContentType};
-use std::error;
+use hyper::header::{ContentLength, ContentType};
+use hyper::method::Method;
+use hyper::mime::Mime;
+use hyper::mime::TopLevel::Text;
+use hyper::mime::SubLevel::Plain;
+use hyper::Url;
+use std::error::Error;
 use std::error::FromError;
-use std::io::net::udp::UdpSocket;
-use std::io::net::ip::{Ipv4Addr, SocketAddr};
+use std::fmt;
+use std::old_io::net::ip::{Ipv4Addr, SocketAddr};
+use std::old_io::net::udp::UdpSocket;
 use std::os;
 use std::str::from_utf8;
 
 
-#[deriving(Show)]
+#[derive(Debug)]
 enum DialError {
     DialProtocolError,
     HttpError(hyper::HttpError),
-    IoError(std::io::IoError),
+    IoError(std::old_io::IoError),
     UrlParseError(url::ParseError),
 }
 type DialResult<T> = Result<T, DialError>;
 
-impl error::Error for DialError {
+use self::DialError::*;
+
+impl Error for DialError {
     fn description(&self) -> &str {
         match *self {
             DialProtocolError => "Dial protocol error",
@@ -39,27 +46,24 @@ impl error::Error for DialError {
         }
     }
 
-    fn detail(&self) -> Option<String> {
+    fn cause(&self) -> Option<&Error> {
         match *self {
             DialProtocolError => None,
-            HttpError(ref err) => err.detail(),
-            IoError(ref err) => err.detail(),
-            UrlParseError(_) => None,
-        }
-    }
-
-    fn cause(&self) -> Option<&error::Error> {
-        match *self {
-            DialProtocolError => None,
-            HttpError(ref err) => Some(err as &error::Error),
-            IoError(ref err) => Some(err as &error::Error),
+            HttpError(ref err) => Some(err as &Error),
+            IoError(ref err) => Some(err as &Error),
             UrlParseError(_) => None, // sadface
         }
     }
 }
 
-impl FromError<std::io::IoError> for DialError {
-    fn from_error(err: std::io::IoError) -> DialError {
+impl fmt::Display for DialError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.description())
+    }
+}
+
+impl FromError<std::old_io::IoError> for DialError {
+    fn from_error(err: std::old_io::IoError) -> DialError {
         IoError(err)
     }
 }
@@ -78,7 +82,6 @@ impl FromError<url::ParseError> for DialError {
 // TODO: it seems like it should be possible to write a macro which generates
 // Error-wrapping types for you.
 
-
 macro_rules! try_log(
     ($e:expr, $($arg:tt)*) => (match $e {
         Ok(e) => e,
@@ -87,7 +90,7 @@ macro_rules! try_log(
             return Err(::std::error::FromError::from_error(e));
         },
     })
-)
+);
 
 
 macro_rules! try_log_return(
@@ -98,13 +101,13 @@ macro_rules! try_log_return(
             return $r;
         },
     })
-)
+);
 
 
 fn get_location(response: &[u8]) -> Option<&str> {
     let location_header = "LOCATION: ";
     match from_utf8(response) {
-        Some(response) => {
+        Ok(response) => {
             for line in response.lines_any() {
                 if line.starts_with(location_header) {
                     return Some(line.slice_from(location_header.len()));
@@ -112,7 +115,7 @@ fn get_location(response: &[u8]) -> Option<&str> {
             }
             None
         },
-        None => None
+        Err(_) => None
     }
 }
 
@@ -120,7 +123,7 @@ fn get_location(response: &[u8]) -> Option<&str> {
 fn get_friendly_name(body: &str) -> Option<&str> {
     let re = regex!(r"<friendlyName>(.+?)</friendlyName>");
     match re.captures(body) {
-        Some(cap) => Some(cap.at(1)),
+        Some(cap) => cap.at(1),
         None => None
     }
 }
@@ -136,17 +139,17 @@ fn discover_dial_locations() -> DialResult<Vec<String>> {
         MX: 2\r\n\
         ST: urn:dial-multiscreen-org:service:dial:1\r\n\r\n";
 
-    let mut socket = try_log!(UdpSocket::bind(any_addr), "bind: {}");
-    debug!("Sending to {}:\n{}", dst_addr, ssdp_msearch);
-    try_log!(socket.send_to(ssdp_msearch.as_bytes(), dst_addr), "send_to: {}");
+    let mut socket = try_log!(UdpSocket::bind(any_addr), "bind: {:?}");
+    debug!("Sending to {:?}:\n{:?}", dst_addr, ssdp_msearch);
+    try_log!(socket.send_to(ssdp_msearch.as_bytes(), dst_addr), "send_to: {:?}");
     socket.set_timeout(Some(3000));  // 3 second timeout
 
     let mut result = Vec::new();
     loop {
-        let mut buf = [0, ..4096];
+        let buf: &mut[u8] = &mut [0; 4096];
         match socket.recv_from(buf) {
             Ok((len, addr)) => {
-                debug!("Received from {}:", addr.ip);
+                debug!("Received from {:?}:", addr.ip);
                 match get_location(buf.slice(0, len)) {
                     Some(location) => result.push(location.to_string()),
                     None => ()
@@ -167,30 +170,30 @@ struct DialServer {
 
 impl DialServer {
     fn new(location: &str) -> DialResult<DialServer> {
-        let url = try_log!(Url::parse(location), "invalid url: {}");
+        let url = try_log!(Url::parse(location), "invalid url: {:?}");
         let host = url.serialize_host();
-        let req = try_log!(Request::get(url), "Failed to connect to {}: {}", location);
+        let req = try_log!(Request::new(Method::Get, url), "Failed to connect to {:?}: {:?}", location);
         let mut res = try_log!(try_log!(req
-                .start(), "Error writing headers: {}")
-                .send(), "Error reading response headers: {}");
+                .start(), "Error writing headers: {:?}")
+                .send(), "Error reading response headers: {:?}");
+        let body = match res.read_to_string() {
+            Ok(body) => Some(body),
+            Err(e) => {
+                error!("Couldn't read body: {:?}", e);
+                None
+            },
+        };
         let app_url = match res.headers.get_raw("Application-URL") {
             Some([ref app_url]) => match from_utf8(app_url.as_slice()) {
-                Some(app_url) => app_url,
-                None => {
-                    error!("invalid app url: {}", app_url);
+                Ok(app_url) => app_url,
+                Err(_) => {
+                    error!("invalid app url: {:?}", app_url);
                     return Err(DialProtocolError);
                 },
             },
             _ => {
-                error!("No app url from {}", location);
+                error!("No app url from {:?}", location);
                 return Err(DialProtocolError);
-            },
-        };
-        let body = match res.read_to_string() {
-            Ok(body) => Some(body),
-            Err(e) => {
-                error!("Couldn't read body: {}", e);
-                None
             },
         };
         let friendly_name = match body {
@@ -215,37 +218,37 @@ impl DialServer {
 
     fn has_app(&self, app_name: &str) -> bool {
         let url_string = if self.app_url.ends_with("/") {
-            self.app_url + app_name
+            self.app_url.clone() + app_name
         } else {
-            self.app_url + "/" + app_name
+            self.app_url.clone() + "/" + app_name
         };
-        let url = try_log_return!(Url::parse(url_string.as_slice()), false, "invalid url: {}");
-        let req = try_log_return!(Request::get(url), false, "Failed to connect to {}: {}", url_string);
-        let started = try_log_return!(req.start(), false, "Error writing headers: {}");
-        let res = try_log_return!(started.send(), false, "Error reading response headers: {}");
+        let url = try_log_return!(Url::parse(url_string.as_slice()), false, "invalid url: {:?}");
+        let req = try_log_return!(Request::new(Method::Get, url), false, "Failed to connect to {:?}: {:?}", url_string);
+        let started = try_log_return!(req.start(), false, "Error writing headers: {:?}");
+        let res = try_log_return!(started.send(), false, "Error reading response headers: {:?}");
         res.status == hyper::status::StatusCode::Ok
     }
 
     fn launch_app(&self, app_name: &str, payload: Option<&str>) -> DialResult<()> {
-        info!("Launching {} with payload {}", app_name, payload);
+        info!("Launching {:?} with payload {:?}", app_name, payload);
         let url_string = if self.app_url.ends_with("/") {
-            self.app_url + app_name
+            self.app_url.clone() + app_name
         } else {
-            self.app_url + "/" + app_name
+            self.app_url.clone() + "/" + app_name
         };
-        let url = try_log!(Url::parse(url_string.as_slice()), "invalid url: {}");
-        let mut req = try_log!(Request::post(url), "Failed to connect to {}: {}", url_string);
+        let url = try_log!(Url::parse(url_string.as_slice()), "invalid url: {:?}");
+        let mut req = try_log!(Request::new(Method::Post, url), "Failed to connect to {:?}: {:?}", url_string);
         match payload {
-            Some(payload) => req.headers_mut().set(ContentLength(payload.len())),
+            Some(payload) => req.headers_mut().set(ContentLength(payload.len() as u64)),
             None => req.headers_mut().set(ContentLength(0))
         };
-        req.headers_mut().set(ContentType(from_str("text/plain").unwrap()));
-        let mut started = try_log!(req.start(), "Error writing headers: {}");
+        req.headers_mut().set(ContentType(Mime(Text, Plain, vec![])));
+        let mut started = try_log!(req.start(), "Error writing headers: {:?}");
         match payload {
-            Some(payload) => try_log!(started.write(payload.as_bytes()), "Error writing body: {}"),
+            Some(payload) => try_log!(started.write(payload.as_bytes()), "Error writing body: {:?}"),
             None => (),
         };
-        let res = try_log!(started.send(), "Error reading response headers: {}");
+        let res = try_log!(started.send(), "Error reading response headers: {:?}");
         match res.status.class() {
             hyper::status::StatusClass::Success => Ok(()),
             _ => Err(DialProtocolError),
@@ -259,7 +262,7 @@ fn main() {
     let opts = [
         optopt("a", "", "set application name", "NAME"),
     ];
-    let matches = match getopts(args.tail(), opts) {
+    let matches = match getopts(args.tail(), &opts) {
         Ok(m) => { m }
         Err(f) => { panic!(f.to_string()) }
     };
@@ -275,7 +278,7 @@ fn main() {
         match DialServer::new(loc.as_slice()) {
             Ok(server) => Some(server),
             Err(e)     => {
-                error!("Couldn't understand DIAL server at location {}: {}", loc, e);
+                error!("Couldn't understand DIAL server at location {:?}: {:?}", loc, e);
                 None
             },
         }
@@ -294,8 +297,8 @@ fn main() {
             println!("Discovered these DIAL servers:");
             for server in servers {
                 let foo: String = server.name;
-                println!("Name: {}", foo);
-                println!("App url: {}", server.app_url);
+                println!("Name: {:?}", foo);
+                println!("App url: {:?}", server.app_url);
             }
         }
     }
