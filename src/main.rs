@@ -164,7 +164,7 @@ fn discover_dial_locations() -> DialResult<Vec<String>> {
 
 struct DialServer {
     name: String,
-    app_url: String
+    rest_url: String
 }
 
 
@@ -183,11 +183,11 @@ impl DialServer {
                 None
             },
         };
-        let app_url = match res.headers.get_raw("Application-URL") {
-            Some([ref app_url]) => match from_utf8(app_url.as_slice()) {
-                Ok(app_url) => app_url,
+        let rest_url = match res.headers.get_raw("Application-URL") {
+            Some([ref rest_url]) => match from_utf8(rest_url.as_slice()) {
+                Ok(rest_url) => rest_url,
                 Err(_) => {
-                    error!("invalid app url: {:?}", app_url);
+                    error!("invalid app url: {:?}", rest_url);
                     return Err(DialProtocolError);
                 },
             },
@@ -213,15 +213,19 @@ impl DialServer {
                 },
             },
         };
-        Ok(DialServer { name: name, app_url: app_url.to_string() } )
+        Ok(DialServer { name: name, rest_url: rest_url.to_string() } )
+    }
+
+    fn get_app_url(&self, app_name: &str) -> String {
+        if self.rest_url.ends_with("/") {
+            self.rest_url.clone() + app_name
+        } else {
+            self.rest_url.clone() + "/" + app_name
+        }
     }
 
     fn has_app(&self, app_name: &str) -> bool {
-        let url_string = if self.app_url.ends_with("/") {
-            self.app_url.clone() + app_name
-        } else {
-            self.app_url.clone() + "/" + app_name
-        };
+        let url_string = self.get_app_url(app_name);
         let url = try_log_return!(Url::parse(url_string.as_slice()), false, "invalid url: {:?}");
         let req = try_log_return!(Request::new(Method::Get, url), false, "Failed to connect to {:?}: {:?}", url_string);
         let started = try_log_return!(req.start(), false, "Error writing headers: {:?}");
@@ -231,11 +235,7 @@ impl DialServer {
 
     fn launch_app(&self, app_name: &str, payload: Option<&str>) -> DialResult<()> {
         info!("Launching {:?} with payload {:?}", app_name, payload);
-        let url_string = if self.app_url.ends_with("/") {
-            self.app_url.clone() + app_name
-        } else {
-            self.app_url.clone() + "/" + app_name
-        };
+        let url_string = self.get_app_url(app_name);
         let url = try_log!(Url::parse(url_string.as_slice()), "invalid url: {:?}");
         let mut req = try_log!(Request::new(Method::Post, url), "Failed to connect to {:?}: {:?}", url_string);
         match payload {
@@ -298,7 +298,7 @@ fn main() {
             for server in servers {
                 let foo: String = server.name;
                 println!("Name: {:?}", foo);
-                println!("App url: {:?}", server.app_url);
+                println!("App url: {:?}", server.rest_url);
             }
         }
     }
