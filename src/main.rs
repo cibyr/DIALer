@@ -1,4 +1,3 @@
-#![feature(macro_rules)]
 #![feature(plugin)]
 
 extern crate getopts;
@@ -110,7 +109,7 @@ fn get_location(response: &[u8]) -> Option<&str> {
         Ok(response) => {
             for line in response.lines_any() {
                 if line.starts_with(location_header) {
-                    return Some(line.slice_from(location_header.len()));
+                    return Some(&line[location_header.len() ..]);
                 }
             }
             None
@@ -150,7 +149,7 @@ fn discover_dial_locations() -> DialResult<Vec<String>> {
         match socket.recv_from(buf) {
             Ok((len, addr)) => {
                 debug!("Received from {}:\n{:?}", addr.ip, from_utf8(buf.slice(0, len)));
-                match get_location(buf.slice(0, len)) {
+                match get_location(&buf[0 .. len]) {
                     Some(location) => result.push(location.to_string()),
                     None => ()
                 }
@@ -245,7 +244,7 @@ impl DialServer {
         req.headers_mut().set(ContentType(Mime(Text, Plain, vec![])));
         let mut started = try_log!(req.start(), "Error writing headers: {}");
         match payload {
-            Some(payload) => try_log!(started.write(payload.as_bytes()), "Error writing body: {}"),
+            Some(payload) => try_log!(started.write_all(payload.as_bytes()), "Error writing body: {}"),
             None => (),
         };
         let res = try_log!(started.send(), "Error reading response headers: {}");
@@ -274,7 +273,7 @@ fn main() {
     };
 
     let locations = discover_dial_locations().ok().expect("discovery failed");
-    let mut servers = locations.iter().filter_map(|loc| {
+    let servers = locations.iter().filter_map(|loc| {
         match DialServer::new(loc.as_slice()) {
             Ok(server) => Some(server),
             Err(e)     => {
