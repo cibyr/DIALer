@@ -140,7 +140,7 @@ fn discover_dial_locations() -> DialResult<Vec<String>> {
         ST: urn:dial-multiscreen-org:service:dial:1\r\n\r\n";
 
     let mut socket = try_log!(UdpSocket::bind(any_addr), "bind: {:?}");
-    debug!("Sending to {:?}:\n{:?}", dst_addr, ssdp_msearch);
+    debug!("Sending to {:?}:\n{}", dst_addr, ssdp_msearch);
     try_log!(socket.send_to(ssdp_msearch.as_bytes(), dst_addr), "send_to: {:?}");
     socket.set_timeout(Some(3000));  // 3 second timeout
 
@@ -149,7 +149,7 @@ fn discover_dial_locations() -> DialResult<Vec<String>> {
         let buf: &mut[u8] = &mut [0; 4096];
         match socket.recv_from(buf) {
             Ok((len, addr)) => {
-                debug!("Received from {:?}:", addr.ip);
+                debug!("Received from {:?}:\n{:?}", addr.ip, from_utf8(buf.slice(0, len)));
                 match get_location(buf.slice(0, len)) {
                     Some(location) => result.push(location.to_string()),
                     None => ()
