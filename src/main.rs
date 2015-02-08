@@ -7,7 +7,7 @@ extern crate hyper;
 extern crate regex;
 extern crate url;
 
-use getopts::{optopt, getopts};
+use getopts::Options;
 use hyper::client::Request;
 use hyper::header::{ContentLength, ContentType};
 use hyper::method::Method;
@@ -256,15 +256,28 @@ impl DialServer {
 }
 
 
+fn print_usage(program: &str, opts: Options) {
+    let brief = format!("Usage: {} [options] [payload]", program);
+    print!("{}", opts.usage(brief.as_slice()));
+}
+
+
 fn main() {
-    let args = os::args();
-    let opts = [
-        optopt("a", "", "set application name", "NAME"),
-    ];
-    let matches = match getopts(args.tail(), &opts) {
+    let args: Vec<String> = os::args();
+    let ref program = args[0];
+
+    let mut options = Options::new();
+    options.optopt("a", "", "set application name", "NAME");
+    options.optflag("h", "help", "print this help message");
+    let matches = match options.parse(args.tail()) {
         Ok(m) => { m }
         Err(f) => { panic!(f.to_string()) }
     };
+    if matches.opt_present("h") {
+        print_usage(program.as_slice(), options);
+        return;
+    }
+
     let app = matches.opt_str("a");
     let payload = if !matches.free.is_empty() {
         Some(matches.free[0].as_slice())
