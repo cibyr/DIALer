@@ -139,9 +139,9 @@ fn discover_dial_locations() -> DialResult<Vec<String>> {
         MX: 2\r\n\
         ST: urn:dial-multiscreen-org:service:dial:1\r\n\r\n";
 
-    let mut socket = try_log!(UdpSocket::bind(any_addr), "bind: {:?}");
-    debug!("Sending to {:?}:\n{}", dst_addr, ssdp_msearch);
-    try_log!(socket.send_to(ssdp_msearch.as_bytes(), dst_addr), "send_to: {:?}");
+    let mut socket = try_log!(UdpSocket::bind(any_addr), "bind: {}");
+    debug!("Sending to {}:\n{}", dst_addr, ssdp_msearch);
+    try_log!(socket.send_to(ssdp_msearch.as_bytes(), dst_addr), "send_to: {}");
     socket.set_timeout(Some(3000));  // 3 second timeout
 
     let mut result = Vec::new();
@@ -149,7 +149,7 @@ fn discover_dial_locations() -> DialResult<Vec<String>> {
         let buf: &mut[u8] = &mut [0; 4096];
         match socket.recv_from(buf) {
             Ok((len, addr)) => {
-                debug!("Received from {:?}:\n{:?}", addr.ip, from_utf8(buf.slice(0, len)));
+                debug!("Received from {}:\n{:?}", addr.ip, from_utf8(buf.slice(0, len)));
                 match get_location(buf.slice(0, len)) {
                     Some(location) => result.push(location.to_string()),
                     None => ()
@@ -170,16 +170,16 @@ struct DialServer {
 
 impl DialServer {
     fn new(location: &str) -> DialResult<DialServer> {
-        let url = try_log!(Url::parse(location), "invalid url: {:?}");
+        let url = try_log!(Url::parse(location), "invalid url: {}");
         let host = url.serialize_host();
-        let req = try_log!(Request::new(Method::Get, url), "Failed to connect to {:?}: {:?}", location);
+        let req = try_log!(Request::new(Method::Get, url), "Failed to connect to {}: {}", location);
         let mut res = try_log!(try_log!(req
-                .start(), "Error writing headers: {:?}")
-                .send(), "Error reading response headers: {:?}");
+                .start(), "Error writing headers: {}")
+                .send(), "Error reading response headers: {}");
         let body = match res.read_to_string() {
             Ok(body) => Some(body),
             Err(e) => {
-                error!("Couldn't read body: {:?}", e);
+                error!("Couldn't read body: {}", e);
                 None
             },
         };
@@ -192,7 +192,7 @@ impl DialServer {
                 },
             },
             _ => {
-                error!("No app url from {:?}", location);
+                error!("No app url from {}", location);
                 return Err(DialProtocolError);
             },
         };
@@ -226,29 +226,29 @@ impl DialServer {
 
     fn has_app(&self, app_name: &str) -> bool {
         let url_string = self.get_app_url(app_name);
-        let url = try_log_return!(Url::parse(url_string.as_slice()), false, "invalid url: {:?}");
-        let req = try_log_return!(Request::new(Method::Get, url), false, "Failed to connect to {:?}: {:?}", url_string);
-        let started = try_log_return!(req.start(), false, "Error writing headers: {:?}");
-        let res = try_log_return!(started.send(), false, "Error reading response headers: {:?}");
+        let url = try_log_return!(Url::parse(url_string.as_slice()), false, "invalid url: {}");
+        let req = try_log_return!(Request::new(Method::Get, url), false, "Failed to connect to {}: {}", url_string);
+        let started = try_log_return!(req.start(), false, "Error writing headers: {}");
+        let res = try_log_return!(started.send(), false, "Error reading response headers: {}");
         res.status == hyper::status::StatusCode::Ok
     }
 
     fn launch_app(&self, app_name: &str, payload: Option<&str>) -> DialResult<()> {
-        info!("Launching {:?} with payload {:?}", app_name, payload);
+        info!("Launching {} with payload {:?}", app_name, payload);
         let url_string = self.get_app_url(app_name);
-        let url = try_log!(Url::parse(url_string.as_slice()), "invalid url: {:?}");
-        let mut req = try_log!(Request::new(Method::Post, url), "Failed to connect to {:?}: {:?}", url_string);
+        let url = try_log!(Url::parse(url_string.as_slice()), "invalid url: {}");
+        let mut req = try_log!(Request::new(Method::Post, url), "Failed to connect to {}: {}", url_string);
         match payload {
             Some(payload) => req.headers_mut().set(ContentLength(payload.len() as u64)),
             None => req.headers_mut().set(ContentLength(0))
         };
         req.headers_mut().set(ContentType(Mime(Text, Plain, vec![])));
-        let mut started = try_log!(req.start(), "Error writing headers: {:?}");
+        let mut started = try_log!(req.start(), "Error writing headers: {}");
         match payload {
-            Some(payload) => try_log!(started.write(payload.as_bytes()), "Error writing body: {:?}"),
+            Some(payload) => try_log!(started.write(payload.as_bytes()), "Error writing body: {}"),
             None => (),
         };
-        let res = try_log!(started.send(), "Error reading response headers: {:?}");
+        let res = try_log!(started.send(), "Error reading response headers: {}");
         match res.status.class() {
             hyper::status::StatusClass::Success => Ok(()),
             _ => Err(DialProtocolError),
@@ -278,7 +278,7 @@ fn main() {
         match DialServer::new(loc.as_slice()) {
             Ok(server) => Some(server),
             Err(e)     => {
-                error!("Couldn't understand DIAL server at location {:?}: {:?}", loc, e);
+                error!("Couldn't understand DIAL server at location {}: {}", loc, e);
                 None
             },
         }
@@ -288,7 +288,7 @@ fn main() {
         Some(app) => {
             let servers: Vec<DialServer> = servers.filter(|s| s.has_app(app.as_slice())).collect();
             match servers.len() {
-                0 => panic!("No servers match"),
+                0 => panic!("Found no DIAL servers with application {:?}", app),
                 1 => servers[0].launch_app(app.as_slice(), payload).ok().expect("failure to launch"),
                 _ => unimplemented!(), // TODO: allow a choice betwwen multiple servers
             }
@@ -297,8 +297,8 @@ fn main() {
             println!("Discovered these DIAL servers:");
             for server in servers {
                 let foo: String = server.name;
-                println!("Name: {:?}", foo);
-                println!("App url: {:?}", server.rest_url);
+                println!("Name: {}", foo);
+                println!("App url: {}", server.rest_url);
             }
         }
     }
