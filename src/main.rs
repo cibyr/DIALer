@@ -1,9 +1,9 @@
 #![feature(plugin)]
+#![plugin(regex_macros)]
 
 extern crate getopts;
 extern crate hyper;
 #[macro_use] extern crate log;
-#[plugin] #[no_link] extern crate regex_macros;
 extern crate regex;
 extern crate url;
 
