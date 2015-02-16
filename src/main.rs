@@ -1,9 +1,11 @@
 #![feature(plugin)]
 #![plugin(regex_macros)]
 
+#[macro_use] extern crate log;
+
+extern crate env_logger;
 extern crate getopts;
 extern crate hyper;
-#[macro_use] extern crate log;
 extern crate regex;
 extern crate url;
 
@@ -263,6 +265,8 @@ fn print_usage(program: &str, opts: Options) {
 
 
 fn main() {
+    env_logger::init().unwrap();
+
     let args: Vec<String> = os::args();
     let ref program = args[0];
 
