@@ -5,8 +5,8 @@ version = "0.0.1"
 authors = ["cullinan"]
 
 [dependencies]
-getopts = "0.2.3"
-hyper = "0.1.11"
-regex = "0.1.14"
-regex_macros = "0.1.8"
-url = "0.2.20"
+getopts = "0.2"
+hyper = "0.1"
+regex = "0.1"
+regex_macros = "0.1"
+url = "0.2"
