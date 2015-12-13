@@ -285,7 +285,7 @@ fn main() {
     let mut options = Options::new();
     options.optopt("a", "", "set application name", "NAME");
     options.optflag("h", "help", "print this help message");
-    let matches = match options.parse(args.tail()) {
+    let matches = match options.parse(&args[1..]) {
         Ok(m) => { m }
         Err(f) => { panic!(f.to_string()) }
     };
