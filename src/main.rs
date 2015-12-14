@@ -1,11 +1,3 @@
-#![feature(duration)]
-#![feature(ip_addr)]
-#![feature(slice_extras)]
-#![feature(plugin)]
-#![feature(socket_timeout)]
-
-#![plugin(regex_macros)]
-
 #[macro_use] extern crate log;
 
 extern crate env_logger;
@@ -22,6 +14,7 @@ use hyper::mime::Mime;
 use hyper::mime::SubLevel::Plain;
 use hyper::mime::TopLevel::Text;
 use hyper::Url;
+use regex::Regex;
 use std::env;
 use std::error::Error;
 use std::fmt;
@@ -128,7 +121,7 @@ fn get_location(response: &[u8]) -> Option<&str> {
 
 
 fn get_friendly_name(body: &str) -> Option<&str> {
-    let re = regex!(r"<friendlyName>(.+?)</friendlyName>");
+    let re = Regex::new(r"<friendlyName>(.+?)</friendlyName>").unwrap();
     match re.captures(body) {
         Some(cap) => cap.at(1),
         None => None
@@ -156,7 +149,7 @@ fn discover_dial_locations() -> DialResult<Vec<String>> {
         let buf: &mut[u8] = &mut [0; 4096];
         match socket.recv_from(buf) {
             Ok((len, addr)) => {
-                debug!("Received from {}:\n{:?}", addr.ip(), from_utf8(&buf[0..len]));
+                debug!("Received from {}:\n{:?}", addr, from_utf8(&buf[0..len]));
                 match get_location(&buf[0 .. len]) {
                     Some(location) => result.push(location.to_string()),
                     None => ()
