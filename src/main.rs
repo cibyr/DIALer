@@ -108,7 +108,7 @@ fn get_location(response: &[u8]) -> Option<&str> {
     let location_header = "LOCATION: ";
     match from_utf8(response) {
         Ok(response) => {
-            for line in response.lines_any() {
+            for line in response.lines() {
                 if line.starts_with(location_header) {
                     return Some(&line[location_header.len() ..]);
                 }
